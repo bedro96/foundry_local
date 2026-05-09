@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 99
+extend-ignore = E203, W503
+per-file-ignores =
+    # Allow star imports in __init__ files (none exist yet, future-proofing)
+    __init__.py: F401
