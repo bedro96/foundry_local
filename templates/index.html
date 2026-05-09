@@ -78,8 +78,16 @@
       color: #fbd38d;
     }
 
-    .msg.agent {
+    .agent-shell {
       align-self: flex-start;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 720px;
+      width: 100%;
+    }
+
+    .msg.agent {
       background: #1a2535;
       color: #e2e8f0;
       border: 1px solid #2d3748;
@@ -88,6 +96,34 @@
     .msg.agent.streaming::after {
       content: "▍";
       animation: blink 0.7s step-end infinite;
+    }
+
+    .thinking-box {
+      border: 1px solid #364152;
+      border-radius: 10px;
+      background: #131a25;
+      color: #cbd5e0;
+      overflow: hidden;
+    }
+
+    .thinking-box summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #cbd5e0;
+      background: #161f2d;
+    }
+
+    .thinking-box summary::-webkit-details-marker { display: none; }
+
+    .msg.thinking {
+      max-width: none;
+      background: transparent;
+      color: #a0aec0;
+      border-radius: 0;
+      padding-top: 0;
     }
 
     @keyframes blink { 50% { opacity: 0; } }
@@ -155,26 +191,59 @@
 
 <script>
   const messagesEl = document.getElementById('messages');
-  const inputEl    = document.getElementById('input');
-  const sendBtn    = document.getElementById('send');
-  const thinkChk   = document.getElementById('think-toggle');
+  const inputEl = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+  const thinkChk = document.getElementById('think-toggle');
   const modelBadge = document.getElementById('model-badge');
 
-  // conversation history sent to /chat
   const history = [{ role: 'system', content: {{ system_prompt | tojson }} }];
 
-  // Fetch and display model name
   fetch('/models').then(r => r.json()).then(d => {
     modelBadge.textContent = d.model.split('/').pop();
   }).catch(() => { modelBadge.textContent = 'unknown model'; });
+
+  function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
 
   function appendMsg(role, text) {
     const el = document.createElement('div');
     el.className = `msg ${role}`;
     el.textContent = text;
     messagesEl.appendChild(el);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToBottom();
     return el;
+  }
+
+  function appendAgentMessage(showThinking) {
+    const shell = document.createElement('div');
+    shell.className = 'agent-shell';
+
+    let thinkingBox = null;
+    let thinkingEl = null;
+    if (showThinking) {
+      thinkingBox = document.createElement('details');
+      thinkingBox.className = 'thinking-box';
+      thinkingBox.hidden = true;
+      thinkingBox.open = true;
+
+      const summary = document.createElement('summary');
+      summary.textContent = '💭 Thinking...';
+
+      thinkingEl = document.createElement('div');
+      thinkingEl.className = 'msg thinking';
+
+      thinkingBox.append(summary, thinkingEl);
+      shell.appendChild(thinkingBox);
+    }
+
+    const answerEl = document.createElement('div');
+    answerEl.className = 'msg agent';
+    shell.appendChild(answerEl);
+    messagesEl.appendChild(shell);
+    scrollToBottom();
+
+    return { answerEl, thinkingBox, thinkingEl };
   }
 
   async function send() {
@@ -188,10 +257,11 @@
     appendMsg('user', text);
     history.push({ role: 'user', content: text });
 
-    const agentEl = appendMsg('agent', '');
-    agentEl.classList.add('streaming');
+    const { answerEl, thinkingBox, thinkingEl } = appendAgentMessage(thinkChk.checked);
+    answerEl.classList.add('streaming');
 
     let reply = '';
+    let thinking = '';
 
     try {
       const resp = await fetch('/chat', {
@@ -204,44 +274,61 @@
       });
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.body) throw new Error('Response body missing');
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let done = false;
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
+      while (!done) {
+        const chunk = await reader.read();
+        done = chunk.done;
+        buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !done });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const raw = line.slice(6).trim();
-          if (raw === '[DONE]') break;
+          if (raw === '[DONE]') {
+            done = true;
+            break;
+          }
 
           const parsed = JSON.parse(raw);
           if (parsed.error) {
-            agentEl.classList.add('error');
-            agentEl.textContent = `Error: ${parsed.error}`;
+            answerEl.classList.add('error');
+            answerEl.textContent = `Error: ${parsed.error}`;
             return;
           }
-          if (parsed.token) {
-            reply += parsed.token;
-            agentEl.textContent = reply;
-            messagesEl.scrollTop = messagesEl.scrollHeight;
+
+          if (parsed.kind === 'thinking' && thinkingBox && thinkingEl) {
+            thinkingBox.hidden = false;
+            thinking += parsed.token || '';
+            thinkingEl.textContent = thinking;
+            scrollToBottom();
+            continue;
+          }
+
+          if (parsed.kind === 'answer' || parsed.token) {
+            reply += parsed.token || '';
+            answerEl.textContent = reply;
+            scrollToBottom();
           }
         }
       }
 
       history.push({ role: 'assistant', content: reply });
+      if (thinkingBox && !thinking) {
+        thinkingBox.remove();
+      }
     } catch (err) {
-      agentEl.classList.add('error');
-      agentEl.textContent = `Connection error: ${err.message}`;
+      answerEl.classList.add('error');
+      const message = err instanceof Error ? err.message : String(err);
+      answerEl.textContent = `Connection error: ${message}`;
     } finally {
-      agentEl.classList.remove('streaming');
+      answerEl.classList.remove('streaming');
       sendBtn.disabled = false;
       inputEl.focus();
     }

@@ -27,6 +27,7 @@ from client import (
     _NO_THINK_TOP_P,
     resolve_model,
     stream_reply,
+    stream_reply_with_thinking,
 )
 
 GREEN = "\033[32m"
@@ -38,6 +39,10 @@ BOLD = "\033[1m"
 PROBE_MESSAGE: list[ChatCompletionMessageParam] = [
     {"role": "system", "content": SYSTEM_PROMPT},
     {"role": "user", "content": "Reply with exactly one sentence about factory safety."},
+]
+THINKING_PROBE_MESSAGE: list[ChatCompletionMessageParam] = [
+    {"role": "system", "content": "You are a helpful assistant. Keep reasoning brief."},
+    {"role": "user", "content": "Answer with exactly OK."},
 ]
 
 
@@ -94,19 +99,41 @@ def test_non_streaming(client: OpenAI, model: str) -> bool:
 
 
 def test_streaming(client: OpenAI, model: str, enable_thinking: bool = False) -> bool:
-    """POST /v1/chat/completions (stream=True) yields non-empty tokens."""
+    """POST /v1/chat/completions (stream=True) yields non-empty answer tokens."""
     label = "thinking=ON" if enable_thinking else "thinking=OFF"
     name = f"POST /v1/chat/completions (streaming, {label})"
     try:
-        tokens: list[str] = []
-        for token in stream_reply(client, model, PROBE_MESSAGE, enable_thinking=enable_thinking):
-            tokens.append(token)
+        answer_tokens: list[str] = []
 
-        full = "".join(tokens).strip()
+        if enable_thinking:
+            thinking_chunks = 0
+            stream = stream_reply_with_thinking(client, model, THINKING_PROBE_MESSAGE)
+            try:
+                for kind, token in stream:
+                    if kind == "thinking":
+                        thinking_chunks += 1
+                        continue
+                    answer_tokens.append(token)
+                    if "".join(answer_tokens).strip():
+                        break
+            finally:
+                stream.close()
+
+            full = "".join(answer_tokens).strip()
+            if not full:
+                _fail(name, "stream yielded no answer tokens")
+                return False
+            _pass(name, f"{thinking_chunks} thinking chunks before answer")
+            return True
+
+        for token in stream_reply(client, model, PROBE_MESSAGE, enable_thinking=False):
+            answer_tokens.append(token)
+
+        full = "".join(answer_tokens).strip()
         if not full:
             _fail(name, "stream yielded no content tokens")
             return False
-        _pass(name, f"{len(tokens)} chunks, {len(full)} chars")
+        _pass(name, f"{len(answer_tokens)} chunks, {len(full)} chars")
         return True
     except Exception as exc:
         _fail(name, str(exc))

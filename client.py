@@ -1,7 +1,7 @@
 """Shared OpenAI client utilities for the local MLX server."""
 
-import re
 from collections.abc import Generator
+from typing import Any
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -21,13 +21,10 @@ SYSTEM_PROMPT = (
 _THINKING_TEMPERATURE = 0.6
 _THINKING_TOP_P = 0.95
 _THINKING_TOP_K = 20
+_THINKING_MAX_TOKENS = 16384
 _NO_THINK_TEMPERATURE = 0.7
 _NO_THINK_TOP_P = 0.8
 _NO_THINK_TOP_K = 20
-
-_THINK_OPEN = "<think>"
-_THINK_CLOSE = "</think>"
-_UNUSED_THINK_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def make_client() -> OpenAI:
@@ -57,19 +54,21 @@ def resolve_model(client: OpenAI) -> str:
     return available_model_ids[0]
 
 
-def stream_reply(
+def _extract_reasoning_token(delta: Any) -> str:
+    model_extra = getattr(delta, "model_extra", None)
+    if not isinstance(model_extra, dict):
+        return ""
+
+    reasoning = model_extra.get("reasoning")
+    return reasoning if isinstance(reasoning, str) else ""
+
+
+def _stream_reply_events(
     client: OpenAI,
     model: str,
     messages: list[ChatCompletionMessageParam],
-    enable_thinking: bool = False,
-) -> Generator[str, None, None]:
-    """Yield reply tokens from the MLX server, skipping <think> blocks.
-
-    When *enable_thinking* is False (default) the model is instructed to skip
-    chain-of-thought entirely.  When True, <think>...</think> blocks are
-    consumed internally and not yielded; only the final answer tokens stream
-    out.
-    """
+    enable_thinking: bool,
+) -> Generator[tuple[str, str], None, None]:
     temperature = _THINKING_TEMPERATURE if enable_thinking else _NO_THINK_TEMPERATURE
     top_p = _THINKING_TOP_P if enable_thinking else _NO_THINK_TOP_P
     top_k = _THINKING_TOP_K if enable_thinking else _NO_THINK_TOP_K
@@ -78,46 +77,54 @@ def stream_reply(
         "chat_template_kwargs": {"enable_thinking": enable_thinking},
         "top_k": top_k,
     }
+    request_args: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "temperature": temperature,
+        "top_p": top_p,
+        "extra_body": extra_body,
+    }
+    if enable_thinking:
+        request_args["max_tokens"] = _THINKING_MAX_TOKENS
 
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=True,
-        temperature=temperature,
-        top_p=top_p,
-        extra_body=extra_body,
-    )
+    stream = client.chat.completions.create(**request_args)
 
-    in_thinking = False
-    buf = ""
+    try:
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            reasoning = _extract_reasoning_token(delta)
+            if reasoning:
+                yield ("thinking", reasoning)
 
-    for chunk in stream:
-        delta = chunk.choices[0].delta
-        content = delta.content or ""
+            content = delta.content
+            if content:
+                yield ("answer", content)
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            close()
 
-        if not content:
+
+def stream_reply(
+    client: OpenAI,
+    model: str,
+    messages: list[ChatCompletionMessageParam],
+    enable_thinking: bool = False,
+) -> Generator[str, None, None]:
+    """Yield only final answer tokens from the MLX server."""
+    thinking_tokens: list[str] = []
+    for kind, token in _stream_reply_events(client, model, messages, enable_thinking):
+        if kind == "thinking":
+            thinking_tokens.append(token)
             continue
+        yield token
 
-        buf += content
 
-        # Process buffer, filtering out <think>...</think> blocks.
-        # Tags may span multiple chunks, so we use a streaming state machine.
-        while buf:
-            if in_thinking:
-                end_idx = buf.find(_THINK_CLOSE)
-                if end_idx >= 0:
-                    in_thinking = False
-                    buf = buf[end_idx + len(_THINK_CLOSE) :]
-                else:
-                    buf = ""  # all buffered content is thinking — discard
-            else:
-                start_idx = buf.find(_THINK_OPEN)
-                if start_idx >= 0:
-                    to_yield = buf[:start_idx]
-                    if to_yield:
-                        yield to_yield
-                    in_thinking = True
-                    buf = buf[start_idx + len(_THINK_OPEN) :]
-                else:
-                    yield buf
-                    buf = ""
+def stream_reply_with_thinking(
+    client: OpenAI,
+    model: str,
+    messages: list[ChatCompletionMessageParam],
+) -> Generator[tuple[str, str], None, None]:
+    """Yield streamed tokens tagged as either thinking or final answer."""
+    yield from _stream_reply_events(client, model, messages, enable_thinking=True)

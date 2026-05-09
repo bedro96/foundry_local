@@ -74,15 +74,27 @@ The model supports chain-of-thought "thinking". **Default: OFF** (cleaner, faste
 |---|---|---|
 | `extra_body` (API) | `{"chat_template_kwargs": {"enable_thinking": True}}` | `{"chat_template_kwargs": {"enable_thinking": False}}` |
 | Prompt soft-switch (per turn) | prefix user message with `/think` | prefix with `/no_think` |
-| Token budget cap | `extra_body: {"thinking_budget": N}` | — |
 
-When thinking is ON, the model emits `<think>…</think>` blocks inline in `delta.content`. `stream_reply()` strips these; the stored reply contains only the final answer.
+**How the server actually streams thinking** (verified against mlx-community/Qwen3.5-9B-MLX-4bit):
+- Reasoning tokens arrive in `delta.model_extra["reasoning"]` — NOT in `delta.content`
+- `delta.content` is `None` during the entire reasoning phase
+- After reasoning finishes, final answer tokens arrive in `delta.content`
+- Thinking does **not** use `<think>` tags in `delta.content`
+
+**⚠️ OOM risk**: Without `max_tokens`, the model can generate thousands of reasoning tokens before answering, crashing the MLX server. Always set `max_tokens` when thinking is ON. The `_THINKING_MAX_TOKENS = 16384` constant in `client.py` handles this.
+
+**Smoke test probe for thinking=ON** must use a very short prompt (e.g., "Answer with exactly OK.") — complex prompts generate 500–1500+ reasoning chunks before answering.
 
 **Recommended sampling params** (set in `client.py`):
 - Thinking ON: `temperature=0.6, top_p=0.95, top_k=20`
 - Thinking OFF: `temperature=0.7, top_p=0.8, top_k=20`
 
 `top_k` is a local-server extension passed inside `extra_body`, not as a top-level API param.
+
+**Key functions** in `client.py`:
+- `stream_reply()` — yields only final answer tokens (hides reasoning)
+- `stream_reply_with_thinking()` — yields `(kind, token)` tuples where `kind` is `"thinking"` or `"answer"`
+- `_extract_reasoning_token(delta)` — reads `delta.model_extra["reasoning"]`
 
 ## Key Conventions
 

@@ -9,10 +9,18 @@ Then open http://127.0.0.1:5000 in your browser.
 
 import json
 from collections.abc import Generator
+from typing import Any, cast
 
 from flask import Flask, Response, render_template, request, stream_with_context
+from openai.types.chat import ChatCompletionMessageParam
 
-from client import SYSTEM_PROMPT, make_client, resolve_model, stream_reply
+from client import (
+    SYSTEM_PROMPT,
+    make_client,
+    resolve_model,
+    stream_reply,
+    stream_reply_with_thinking,
+)
 
 app = Flask(__name__)
 _client = make_client()
@@ -32,16 +40,25 @@ def models() -> Response:
 @app.route("/chat", methods=["POST"])
 def chat() -> Response:
     """SSE endpoint: streams reply tokens to the browser."""
-    data = request.get_json(force=True) or {}
-    messages = data.get("messages", [{"role": "system", "content": SYSTEM_PROMPT}])
-    enable_thinking: bool = bool(data.get("enable_thinking", False))
+    payload = request.get_json(force=True)
+    data = payload if isinstance(payload, dict) else {}
+    raw_messages = data.get("messages")
+    messages = cast(list[ChatCompletionMessageParam], raw_messages)
+    if not isinstance(raw_messages, list):
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
+    enable_thinking = bool(data.get("enable_thinking", False))
     model = resolve_model(_client)
 
     def generate() -> Generator[str, None, None]:
         try:
-            for token in stream_reply(_client, model, messages, enable_thinking=enable_thinking):
-                yield f"data: {json.dumps({'token': token})}\n\n"
+            if enable_thinking:
+                for kind, token in stream_reply_with_thinking(_client, model, messages):
+                    payload_out: dict[str, Any] = {"kind": kind, "token": token}
+                    yield f"data: {json.dumps(payload_out)}\n\n"
+            else:
+                for token in stream_reply(_client, model, messages, enable_thinking=False):
+                    yield f"data: {json.dumps({'token': token})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
         finally:

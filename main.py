@@ -11,12 +11,19 @@ import argparse
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from client import SYSTEM_PROMPT, make_client, resolve_model, stream_reply
+from client import (
+    SYSTEM_PROMPT,
+    make_client,
+    resolve_model,
+    stream_reply,
+    stream_reply_with_thinking,
+)
 
 # ANSI color codes
 ORANGE = "\033[38;5;208m"
 WHITE = "\033[97m"
 GREEN = "\033[32m"
+DIM_GRAY = "\033[2;37m"
 RESET = "\033[0m"
 
 
@@ -27,14 +34,36 @@ def create_completion(
     enable_thinking: bool = False,
 ) -> str:
     """Stream a completion from the MLX server, printing tokens as they arrive."""
-    print(f"{GREEN}Agent > ", end="", flush=True)
+    answer_tokens: list[str] = []
 
-    tokens: list[str] = []
-    for token in stream_reply(client, model, messages, enable_thinking=enable_thinking):
-        print(token, end="", flush=True)
-        tokens.append(token)
+    if enable_thinking:
+        thinking_started = False
+        answer_started = False
 
-    full_reply = "".join(tokens).strip()
+        for kind, token in stream_reply_with_thinking(client, model, messages):
+            if kind == "thinking":
+                if not thinking_started:
+                    print(f"{DIM_GRAY}Thinking > ", end="", flush=True)
+                    thinking_started = True
+                print(token, end="", flush=True)
+                continue
+
+            if thinking_started and not answer_started:
+                print(RESET)
+
+            if not answer_started:
+                print(f"{GREEN}Agent > ", end="", flush=True)
+                answer_started = True
+
+            print(token, end="", flush=True)
+            answer_tokens.append(token)
+    else:
+        print(f"{GREEN}Agent > ", end="", flush=True)
+        for token in stream_reply(client, model, messages, enable_thinking=False):
+            print(token, end="", flush=True)
+            answer_tokens.append(token)
+
+    full_reply = "".join(answer_tokens).strip()
     print(RESET)
 
     if not full_reply:
