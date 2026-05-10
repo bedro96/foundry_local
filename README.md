@@ -13,8 +13,11 @@ foundry_local/
 ├── client.py          # Shared logic: OpenAI client, model resolution, streaming
 ├── main.py            # CLI chat client (terminal, streaming, --think flag)
 ├── app.py             # Flask web UI with SSE streaming
+├── app_mcp.py         # Flask web UI with SSE + stdio MCP tool calls
 ├── templates/
 │   └── index.html     # Browser chat UI (EventSource/fetch, marked.js rendering)
+├── main_mcp.py        # CLI chat client with stdio MCP tool calls
+├── mcp_server.py      # Local stdio MCP server for mock machine temperature tools
 ├── smoke_test.py      # Integration tests against the real MLX API server
 ├── pyproject.toml     # Project metadata, dependencies, tool configs
 ├── uv.lock            # Locked dependency versions
@@ -28,6 +31,9 @@ foundry_local/
 | `client.py` | `make_client()`, `resolve_model()`, `stream_reply()`, constants (base URL, system prompt, sampling params) |
 | `main.py` | Interactive CLI chat with ANSI colors, streaming output, `--think` flag |
 | `app.py` | Flask server at `:5000` — serves web UI, exposes `/chat` SSE endpoint |
+| `main_mcp.py` | CLI variant that connects the MLX OpenAI-compatible endpoint to the local stdio MCP server |
+| `app_mcp.py` | Flask web variant that resolves MCP tool calls before streaming the final answer to the browser |
+| `mcp_server.py` | FastMCP stdio server that exposes mock factory tools such as `get_machine_temperature()` |
 | `templates/index.html` | Single-page chat UI with markdown rendering, thinking mode toggle |
 | `smoke_test.py` | Validates models endpoint, non-streaming, streaming, and Flask UI |
 
@@ -197,9 +203,12 @@ uvx --from mlx-lm mlx_lm.server
 # 2a. Run the CLI chat client
 uv run main.py              # Thinking mode OFF (default)
 uv run main.py --think      # Thinking mode ON
+uv run main_mcp.py          # CLI with stdio MCP tools
+uv run main_mcp.py --think  # CLI with stdio MCP tools + thinking mode
 
 # 2b. Or run the Flask web UI
 uv run app.py               # Opens at http://127.0.0.1:5000
+uv run app_mcp.py           # Flask UI with stdio MCP tool integration
 ```
 
 ### Smoke Test
@@ -216,10 +225,10 @@ uv run smoke_test.py --think    # Also tests streaming with thinking mode ON
 ### Dev Commands
 
 ```zsh
-uv run black main.py app.py client.py smoke_test.py       # Format
-uv run flake8 main.py app.py client.py smoke_test.py      # Lint
-uv run mypy main.py app.py client.py smoke_test.py        # Type-check (strict)
-uv run bandit main.py app.py client.py smoke_test.py      # Security scan
+uv run black main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
+uv run flake8 main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
+uv run mypy main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
+uv run bandit main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
 ```
 
 ### Configuration
@@ -246,8 +255,54 @@ uv run bandit main.py app.py client.py smoke_test.py      # Security scan
 - **SSE streaming** — real-time token-by-token response in CLI and web UI
 - **Thinking mode** — chain-of-thought reasoning (collapsible in web UI)
 - **Markdown rendering** — LLM responses rendered as styled HTML with custom quirk fixes
+- **stdio MCP support** — works with a local MCP server over stdio, not just plain chat completions
+- **Factory tool calling** — Qwen3.5 on the MLX OpenAI-compatible endpoint successfully calls MCP tools and uses their results in final answers
 - **Dark theme** — purpose-built dark UI for factory/industrial context
 - **Smart Factory persona** — specialized system prompt for manufacturing operations
+
+---
+
+## 🔌 MCP Integration
+
+This project now includes a fully working **local stdio MCP** integration path for both the CLI and Flask web app.
+
+### MCP Files
+
+| File | Purpose |
+|------|---------|
+| `mcp_server.py` | FastMCP stdio server exposing mock factory tools |
+| `main_mcp.py` | CLI client that performs OpenAI-style tool calling against the MLX server |
+| `app_mcp.py` | Flask web UI that resolves MCP tool calls before streaming the final answer |
+
+### Available Tools
+
+- `get_machine_temperature(machine_id)` — returns a mock live temperature reading and status
+- `list_machines()` — returns all factory machines, zones, and normal temperature ranges
+
+### Verified Result
+
+The MLX server running `mlx-community/Qwen3.5-9B-MLX-4bit` **works with stdio MCP** through its OpenAI-compatible chat completions API:
+
+1. The app sends MCP tools in OpenAI function-calling format.
+2. Qwen3.5 emits structured `tool_calls`.
+3. The local MCP stdio server executes the request and returns sensor data.
+4. The app streams the final answer back to the user with the tool result incorporated.
+
+### Example
+
+```text
+User: What is the temperature of FURNACE-001?
+Tool call: get_machine_temperature({"machine_id":"FURNACE-001"})
+Tool result: 880.2°C, NORMAL, range 800–950°C
+Final answer: The current temperature of FURNACE-001 is 880.2°C and within the normal range.
+```
+
+### Test Results
+
+- `main_mcp.py` successfully called both `get_machine_temperature` and `list_machines`
+- `app_mcp.py` successfully served `/`, `/models`, and `/chat`
+- `/chat` on `app_mcp.py` successfully triggered stdio MCP tool calls and streamed the final response over SSE
+- `uv run smoke_test.py` passed against the live MLX API server after the MCP web integration work
 
 ---
 
