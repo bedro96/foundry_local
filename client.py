@@ -25,6 +25,7 @@ _THINKING_MAX_TOKENS = 16384
 _NO_THINK_TEMPERATURE = 0.7
 _NO_THINK_TOP_P = 0.8
 _NO_THINK_TOP_K = 20
+_NO_THINK_MAX_TOKENS = 8192
 
 
 def make_client() -> OpenAI:
@@ -87,6 +88,8 @@ def _stream_reply_events(
     }
     if enable_thinking:
         request_args["max_tokens"] = _THINKING_MAX_TOKENS
+    else:
+        request_args["max_tokens"] = _NO_THINK_MAX_TOKENS
 
     stream = client.chat.completions.create(**request_args)
 
