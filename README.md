@@ -1,5 +1,266 @@
-Yoyoyo
+# 🏭 Smart Factory Agent — Local LLM on Apple Silicon
 
-# Command
-## ```zsh
+A terminal-based multi-turn chat client **and** Flask web UI for a **smart factory / shipyard agent** persona, powered by a local LLM running on Apple Silicon via [MLX](https://github.com/apple/mlx).
+
+No cloud API keys needed — everything runs locally on your Mac.
+
+---
+
+## 📁 Project Structure
+
+```
+foundry_local/
+├── client.py          # Shared logic: OpenAI client, model resolution, streaming
+├── main.py            # CLI chat client (terminal, streaming, --think flag)
+├── app.py             # Flask web UI with SSE streaming
+├── templates/
+│   └── index.html     # Browser chat UI (EventSource/fetch, marked.js rendering)
+├── smoke_test.py      # Integration tests against the real MLX API server
+├── pyproject.toml     # Project metadata, dependencies, tool configs
+├── uv.lock            # Locked dependency versions
+├── .flake8            # Flake8 linter config
+└── .github/
+    └── copilot-instructions.md
+```
+
+| File | Role |
+|------|------|
+| `client.py` | `make_client()`, `resolve_model()`, `stream_reply()`, constants (base URL, system prompt, sampling params) |
+| `main.py` | Interactive CLI chat with ANSI colors, streaming output, `--think` flag |
+| `app.py` | Flask server at `:5000` — serves web UI, exposes `/chat` SSE endpoint |
+| `templates/index.html` | Single-page chat UI with markdown rendering, thinking mode toggle |
+| `smoke_test.py` | Validates models endpoint, non-streaming, streaming, and Flask UI |
+
+---
+
+## 🧠 What is MLX?
+
+**[MLX](https://github.com/apple/mlx)** is an open-source machine learning framework created by **Apple**, specifically designed and optimized for **Apple Silicon** (M1/M2/M3/M4) chips.
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Unified Memory** | Leverages Apple Silicon's shared CPU/GPU memory — no data copying between devices |
+| **NumPy-like API** | Familiar Python interface for ML researchers and developers |
+| **Lazy Evaluation** | Computations are only materialized when needed, enabling efficient memory use |
+| **On-Device Privacy** | All inference runs locally — no data leaves your machine |
+| **LLM Optimized** | First-class support for running large language models via `mlx-lm` |
+
+### Why MLX for Local LLMs?
+
+- **No cloud dependency** — works offline, zero API costs
+- **Privacy** — factory/industrial data never leaves the device
+- **Low latency** — no network round-trip
+- **Apple Silicon efficiency** — leverages Neural Engine and unified memory architecture
+
+---
+
+## 🚀 How to Run the MLX Server
+
+The MLX LLM server provides an **OpenAI-compatible API** at `http://127.0.0.1:8080/v1`:
+
+```zsh
+# Start the MLX inference server (downloads model on first run)
 uvx --from mlx-lm mlx_lm.server
+```
+
+The server will:
+1. Load the model into unified memory
+2. Expose `/v1/models`, `/v1/chat/completions` endpoints
+3. Support streaming and non-streaming responses
+
+---
+
+## 🤖 Model: Qwen3.5-9B-MLX-4bit
+
+### Background
+
+**Qwen3.5-9B** is a 9-billion parameter vision-language model developed by **Alibaba Cloud (通义千问)**. Released under the **Apache 2.0** license, it represents a significant leap in open-source LLM capability.
+
+The `mlx-community/Qwen3.5-9B-MLX-4bit` variant is a **4-bit quantized** version optimized for Apple Silicon via MLX.
+
+### Architecture
+
+| Spec | Value |
+|------|-------|
+| Parameters | 9B |
+| Architecture | Gated DeltaNet + Mixture-of-Experts (MoE) |
+| Context Length | 262,144 tokens (native) |
+| Hidden Dimension | 4,096 |
+| Layers | 32 |
+| Quantization | 4-bit (group size 64) |
+| Disk Size | ~5.6 GB |
+| License | Apache 2.0 |
+
+### Key Characteristics
+
+- **Unified Vision-Language**: Early fusion training on multimodal tokens (text, image, video)
+- **Efficient Hybrid Architecture**: Gated Delta Networks (linear attention) + sparse MoE for high throughput
+- **Thinking Mode**: Built-in chain-of-thought reasoning (`enable_thinking: true`)
+- **Multilingual**: 201 languages and dialects
+- **Giant Killer**: Outperforms GPT-OSS-120B (a 120B model) in many benchmarks
+
+---
+
+## 📊 Benchmark Results
+
+### Official Qwen3.5 Benchmark Comparison
+
+[![Qwen3.5 Small Model Benchmarks](https://qianwen-res.oss-accelerate-overseas.aliyuncs.com/Qwen3.5/Figures/qwen3.5_small_size_score.png)](https://huggingface.co/Qwen/Qwen3.5-9B)
+
+### Language & Reasoning
+
+| Benchmark | Qwen3.5-9B | GPT-OSS-120B | Qwen3.5-4B |
+|-----------|-----------|--------------|------------|
+| **MMLU-Pro** | 82.5 | 80.8 | 79.1 |
+| **GPQA Diamond** | 81.7 | 80.1 | 76.2 |
+| **MMLU-Redux** | 91.1 | 91.0 | 88.8 |
+| **C-Eval** | 88.2 | 76.2 | 85.1 |
+| **IFEval** | 91.5 | 88.9 | 89.8 |
+
+### Multimodal / Vision
+
+| Benchmark | Qwen3.5-9B | GPT-5-Nano | Gemini 2.5 Flash-Lite |
+|-----------|-----------|-----------|----------------------|
+| **MMMU-Pro** | 70.1 | 57.2 | 59.7 |
+| **MathVision** | 78.9 | 62.2 | 52.1 |
+| **Video-MME** | 84.5 | — | 74.6 |
+
+### Math & Coding
+
+| Benchmark | Qwen3.5-9B | GPT-OSS-120B |
+|-----------|-----------|--------------|
+| **HMMT Feb 25** | 83.2 | 90.0 |
+| **LiveCodeBench v6** | 65.6 | 82.7 |
+| **Mathematics (General)** | 97% | — |
+| **Coding (General)** | 92% | — |
+
+> **Key Takeaway**: Qwen3.5-9B consistently outperforms models **10–13× its size** in reasoning, vision, and multilingual tasks, making it ideal for efficient on-device deployment.
+
+---
+
+## 💻 Hardware
+
+### Original Model Requirements
+
+| Quantization | Memory Usage | Recommended Hardware |
+|-------------|-------------|---------------------|
+| 4-bit | ~6.0–7.0 GB | 16 GB Macs (MacBook Air, Mac Mini, etc.) |
+| 6-bit | ~7.9 GB | 16 GB+ Macs |
+| 8-bit | ~10.4 GB | 24 GB+ Macs |
+| FP16 | ~20.3 GB | 32 GB+ Macs |
+
+> Add ~1 GB per additional 8K context tokens.
+
+### Test Hardware Used
+
+| Component | Spec |
+|-----------|------|
+| **Machine** | Mac Mini (2024) |
+| **Chip** | Apple M4 |
+| **Unified Memory** | 16 GB |
+| **OS** | macOS Sequoia |
+| **Model** | `mlx-community/Qwen3.5-9B-MLX-4bit` |
+| **Inference Speed** | ~25–35 tokens/sec |
+| **Memory at Inference** | ~6.5 GB (model + KV cache @ 4K context) |
+
+The Mac Mini M4 with 16 GB RAM comfortably runs the 4-bit quantized model with headroom for the OS and other applications.
+
+---
+
+## ⚡ Getting Started
+
+### Prerequisites
+
+- **macOS** on Apple Silicon (M1/M2/M3/M4)
+- **Python 3.13+**
+- **[uv](https://docs.astral.sh/uv/)** package manager
+
+### Installation
+
+```zsh
+# Clone the repository
+git clone https://github.com/bedro96/foundry_local.git
+cd foundry_local
+
+# Install dependencies
+uv sync
+```
+
+### Running
+
+```zsh
+# 1. Start the MLX inference server (separate terminal)
+uvx --from mlx-lm mlx_lm.server
+
+# 2a. Run the CLI chat client
+uv run main.py              # Thinking mode OFF (default)
+uv run main.py --think      # Thinking mode ON
+
+# 2b. Or run the Flask web UI
+uv run app.py               # Opens at http://127.0.0.1:5000
+```
+
+### Smoke Test
+
+```zsh
+uv run smoke_test.py            # Tests: models, non-streaming, streaming
+uv run smoke_test.py --think    # Also tests streaming with thinking mode ON
+```
+
+---
+
+## 🛠 Development
+
+### Dev Commands
+
+```zsh
+uv run black main.py app.py client.py smoke_test.py       # Format
+uv run flake8 main.py app.py client.py smoke_test.py      # Lint
+uv run mypy main.py app.py client.py smoke_test.py        # Type-check (strict)
+uv run bandit main.py app.py client.py smoke_test.py      # Security scan
+```
+
+### Configuration
+
+- **Line length**: 99 characters
+- **Python version**: 3.13+
+- **Type checking**: `mypy --strict` (all files)
+- **Package manager**: `uv` (not pip)
+
+### Key Constants (in `client.py`)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `BASE_URL` | `http://127.0.0.1:8080/v1` | MLX server endpoint |
+| `DEFAULT_MODEL` | `mlx-community/Qwen3-0.6B-MLX-4bit` | Preferred model (fallback to first available) |
+| `_THINKING_MAX_TOKENS` | 16,384 | Max tokens with thinking ON |
+| `_NO_THINK_MAX_TOKENS` | 8,192 | Max tokens with thinking OFF |
+
+---
+
+## 🔧 Features
+
+- **Multi-turn conversation** — maintains full chat history
+- **SSE streaming** — real-time token-by-token response in CLI and web UI
+- **Thinking mode** — chain-of-thought reasoning (collapsible in web UI)
+- **Markdown rendering** — LLM responses rendered as styled HTML with custom quirk fixes
+- **Dark theme** — purpose-built dark UI for factory/industrial context
+- **Smart Factory persona** — specialized system prompt for manufacturing operations
+
+---
+
+## 📚 References
+
+- [Apple MLX Framework](https://github.com/apple/mlx)
+- [mlx-lm: LLM inference for MLX](https://github.com/ml-explore/mlx-lm)
+- [Qwen3.5-9B on HuggingFace](https://huggingface.co/Qwen/Qwen3.5-9B)
+- [mlx-community/Qwen3.5-9B-MLX-4bit](https://huggingface.co/mlx-community/Qwen3.5-9B-MLX-4bit)
+- [Qwen3.5 Official Blog](https://qwen.ai/blog?id=qwen3.5)
+
+---
+
+## 📄 License
+
+This project is open source. The Qwen3.5-9B model is licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).

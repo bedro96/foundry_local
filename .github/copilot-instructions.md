@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A terminal-based multi-turn chat client **and** Flask web UI for a **smart factory / shipyard agent** persona, running a local MLX LLM (Apple Silicon) via an OpenAI-compatible API endpoint.
+A terminal-based multi-turn chat client **and** Flask web UI for a **smart factory agent** persona, running a local MLX LLM (Apple Silicon) via an OpenAI-compatible API endpoint.
 
 ## ⚠️ Smoke Test Requirement
 
@@ -39,7 +39,7 @@ uv run main.py --think   # CLI with thinking mode ON
 uv run app.py            # Flask web UI at http://127.0.0.1:5000
 ```
 
-`resolve_model()` auto-selects the model: prefers `mlx-community/Qwen3-0.6B-MLX-4bit`, falls back to the first available model.
+`resolve_model()` auto-selects the model: prefers `mlx-community/Qwen3.5-9B-MLX-4bit`, falls back to the first available model.
 
 `stream_reply()` is the single authoritative streaming implementation. It filters `<think>…</think>` blocks from `delta.content` using a streaming state machine (tags may span multiple chunks).
 
