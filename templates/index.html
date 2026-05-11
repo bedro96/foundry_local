@@ -325,10 +325,8 @@
     // 1. Bullet fix FIRST — split "text* item" onto separate lines.
     text = text.split('\n').map(fixBulletsInLine).join('\n');
 
-    // 2. Bold: **text ** → **text** (space before closing **)
-    text = text.replace(/\*\*(.+?)[^\S\n]+\*\*/g, '**$1**');
-    // Bold: ** text** → **text** (space after opening **)
-    text = text.replace(/\*\*[^\S\n]+(.+?)\*\*/g, '**$1**');
+    // 2. Bold: trim only the inside edges of each single-line **...** span.
+    text = text.replace(/\*\*([^\n]+?)\*\*/g, (_, inner) => `**${inner.trim()}**`);
     // Bold opener spacing: word**text** → word **text**
     text = text.replace(/([A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])(\*\*[^*\n]+?\*\*)/gu, '$1 $2');
 
