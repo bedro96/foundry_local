@@ -325,6 +325,8 @@
     text = text.replace(/\*\*(.+?)[^\S\n]+\*\*/g, '**$1**');
     // Bold: ** text** → **text** (space after opening **)
     text = text.replace(/\*\*[^\S\n]+(.+?)\*\*/g, '**$1**');
+    // Bold opener spacing: word**text** → word **text**
+    text = text.replace(/([A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])(\*\*[^*\n]+?\*\*)/gu, '$1 $2');
 
     // 3. Bold right-flanking fix: **text:**word → **text:** word
     //    Closing ** preceded by punctuation and followed by a word char
