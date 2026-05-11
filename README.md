@@ -14,11 +14,13 @@ foundry_local/
 ├── main.py            # CLI chat client (terminal, streaming, --think flag)
 ├── app.py             # Flask web UI with SSE streaming
 ├── app_mcp.py         # Flask web UI with SSE + stdio MCP tool calls
-├── templates/
-│   └── index.html     # Browser chat UI (EventSource/fetch, marked.js rendering)
 ├── main_mcp.py        # CLI chat client with stdio MCP tool calls
 ├── mcp_server.py      # Local stdio MCP server for mock machine temperature tools
+├── foundry_local.py   # Hybrid Foundry Local SDK manager + MLX OpenAI backend
 ├── smoke_test.py      # Integration tests against the real MLX API server
+├── templates/
+│   └── index.html     # Browser chat UI (EventSource/fetch, marked.js rendering)
+├── img/               # Chart images embedded in this README
 ├── pyproject.toml     # Project metadata, dependencies, tool configs
 ├── uv.lock            # Locked dependency versions
 ├── .flake8            # Flake8 linter config
@@ -34,6 +36,7 @@ foundry_local/
 | `main_mcp.py` | CLI variant that connects the MLX OpenAI-compatible endpoint to the local stdio MCP server |
 | `app_mcp.py` | Flask web variant that resolves MCP tool calls before streaming the final answer to the browser |
 | `mcp_server.py` | FastMCP stdio server that exposes mock factory tools such as `get_machine_temperature()` |
+| `foundry_local.py` | Hybrid client: boots the Microsoft `foundry-local-sdk` control plane, then streams chat through the MLX server |
 | `templates/index.html` | Single-page chat UI with markdown rendering, thinking mode toggle |
 | `smoke_test.py` | Validates models endpoint, non-streaming, streaming, and Flask UI |
 
@@ -117,30 +120,20 @@ The `mlx-community/Qwen3.5-9B-MLX-4bit` variant is a **4-bit quantized** version
 
 ### Language & Reasoning
 
-| Benchmark | Qwen3.5-9B | GPT-OSS-120B | Qwen3.5-4B |
-|-----------|-----------|--------------|------------|
-| **MMLU-Pro** | 82.5 | 80.8 | 79.1 |
-| **GPQA Diamond** | 81.7 | 80.1 | 76.2 |
-| **MMLU-Redux** | 91.1 | 91.0 | 88.8 |
-| **C-Eval** | 88.2 | 76.2 | 85.1 |
-| **IFEval** | 91.5 | 88.9 | 89.8 |
+![Language & Reasoning Benchmarks](img/benchmark-language-reasoning.png)
 
 ### Multimodal / Vision
 
-| Benchmark | Qwen3.5-9B | GPT-5-Nano | Gemini 2.5 Flash-Lite |
-|-----------|-----------|-----------|----------------------|
-| **MMMU-Pro** | 70.1 | 57.2 | 59.7 |
-| **MathVision** | 78.9 | 62.2 | 52.1 |
-| **Video-MME** | 84.5 | — | 74.6 |
+![Multimodal / Vision Benchmarks](img/benchmark-multimodal-vision.png)
+
+> Note: GPT-5-Nano does not report a Video-MME score.
 
 ### Math & Coding
 
-| Benchmark | Qwen3.5-9B | GPT-OSS-120B |
-|-----------|-----------|--------------|
-| **HMMT Feb 25** | 83.2 | 90.0 |
-| **LiveCodeBench v6** | 65.6 | 82.7 |
-| **Mathematics (General)** | 97% | — |
-| **Coding (General)** | 92% | — |
+![Math & Coding Benchmarks](img/benchmark-math-coding.png)
+
+> Qwen3.5-9B also reports ~97% Mathematics (General) and ~92% Coding (General),
+> for which no GPT-OSS-120B comparison value is published.
 
 > **Key Takeaway**: Qwen3.5-9B consistently outperforms models **10–13× its size** in reasoning, vision, and multilingual tasks, making it ideal for efficient on-device deployment.
 
@@ -150,12 +143,7 @@ The `mlx-community/Qwen3.5-9B-MLX-4bit` variant is a **4-bit quantized** version
 
 ### Original Model Requirements
 
-| Quantization | Memory Usage | Recommended Hardware |
-|-------------|-------------|---------------------|
-| 4-bit | ~6.0–7.0 GB | 16 GB Macs (MacBook Air, Mac Mini, etc.) |
-| 6-bit | ~7.9 GB | 16 GB+ Macs |
-| 8-bit | ~10.4 GB | 24 GB+ Macs |
-| FP16 | ~20.3 GB | 32 GB+ Macs |
+![Qwen3.5-9B Memory Footprint by Quantization](img/hardware-memory-by-quantization.png)
 
 > Add ~1 GB per additional 8K context tokens.
 
@@ -201,14 +189,16 @@ uv sync
 uvx --from mlx-lm mlx_lm.server
 
 # 2a. Run the CLI chat client
-uv run main.py              # Thinking mode OFF (default)
-uv run main.py --think      # Thinking mode ON
-uv run main_mcp.py          # CLI with stdio MCP tools
-uv run main_mcp.py --think  # CLI with stdio MCP tools + thinking mode
+uv run main.py                  # Thinking mode OFF (default)
+uv run main.py --think          # Thinking mode ON
+uv run main_mcp.py              # CLI with stdio MCP tools
+uv run main_mcp.py --think      # CLI with stdio MCP tools + thinking mode
+uv run foundry_local.py         # Hybrid Foundry Local SDK + MLX backend
+uv run foundry_local.py --think # Hybrid client with thinking mode ON
 
 # 2b. Or run the Flask web UI
-uv run app.py               # Opens at http://127.0.0.1:5000
-uv run app_mcp.py           # Flask UI with stdio MCP tool integration
+uv run app.py                   # Opens at http://127.0.0.1:5000
+uv run app_mcp.py               # Flask UI with stdio MCP tool integration
 ```
 
 ### Smoke Test
@@ -225,10 +215,10 @@ uv run smoke_test.py --think    # Also tests streaming with thinking mode ON
 ### Dev Commands
 
 ```zsh
-uv run black main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
-uv run flake8 main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
-uv run mypy main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
-uv run bandit main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smoke_test.py
+uv run black main.py app.py app_mcp.py client.py foundry_local.py main_mcp.py mcp_server.py smoke_test.py
+uv run flake8 main.py app.py app_mcp.py client.py foundry_local.py main_mcp.py mcp_server.py smoke_test.py
+uv run mypy main.py app.py app_mcp.py client.py foundry_local.py main_mcp.py mcp_server.py smoke_test.py
+uv run bandit main.py app.py app_mcp.py client.py foundry_local.py main_mcp.py mcp_server.py smoke_test.py
 ```
 
 ### Configuration
@@ -243,7 +233,7 @@ uv run bandit main.py app.py app_mcp.py client.py main_mcp.py mcp_server.py smok
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `BASE_URL` | `http://127.0.0.1:8080/v1` | MLX server endpoint |
-| `DEFAULT_MODEL` | `mlx-community/Qwen3-0.6B-MLX-4bit` | Preferred model (fallback to first available) |
+| `DEFAULT_MODEL` | `mlx-community/Qwen3.5-9B-MLX-4bit` | Preferred model (fallback to first available) |
 | `_THINKING_MAX_TOKENS` | 16,384 | Max tokens with thinking ON |
 | `_NO_THINK_MAX_TOKENS` | 8,192 | Max tokens with thinking OFF |
 
