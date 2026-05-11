@@ -7,7 +7,7 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 BASE_URL = "http://127.0.0.1:8080/v1"
-DEFAULT_MODEL = "mlx-community/Qwen3-0.6B-MLX-4bit"
+DEFAULT_MODEL = "mlx-community/Qwen3.5-9B-MLX-4bit"
 
 SYSTEM_PROMPT = (
     "You are a stable smart factory agent. "
