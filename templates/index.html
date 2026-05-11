@@ -303,6 +303,10 @@
     );
   }
 
+  function fixTemperatureUnits(text) {
+    return text.replace(/(\d+(?:\.\d+)?(?:[-–]\d+(?:\.\d+)?)?)°([CF])/g, '$1 °$2');
+  }
+
   function fixKnownRunOnPhrases(text) {
     const repairs = [
       [/\borderfor\b/gi, 'order for'],
@@ -343,6 +347,7 @@
 
     // 5. Fix common LLM run-on tokens that break readability after rendering.
     text = fixRunOnMeasurements(text);
+    text = fixTemperatureUnits(text);
     text = fixKnownRunOnPhrases(text);
 
     // 6. Tab-separated tables → pipe-separated markdown tables.
