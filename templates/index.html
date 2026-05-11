@@ -307,6 +307,38 @@
     return text.replace(/(\d+(?:\.\d+)?(?:[-–]\d+(?:\.\d+)?)?)°([CF])/g, '$1 °$2');
   }
 
+  // Per-line bold normalizer. Pairs ** positionally (1st=open, 2nd=close, ...),
+  // trims inner whitespace, ensures spacing outside the span, and drops any
+  // orphan unpaired ** so literal asterisks never reach the renderer.
+  function normalizeBoldSpans(line) {
+    const parts = line.split('**');
+    if (parts.length < 3) return line;
+    const wordRe = /[A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3]/u;
+    const pairs = Math.floor((parts.length - 1) / 2);
+    let out = parts[0];
+    for (let p = 0; p < pairs; p++) {
+      const beforeIdx = 2 * p;
+      const innerIdx = 2 * p + 1;
+      const afterIdx = 2 * p + 2;
+      const before = out;
+      const inner = parts[innerIdx].trim();
+      const after = parts[afterIdx];
+      if (inner.length === 0) {
+        out = before + after;
+        continue;
+      }
+      const prevChar = before.slice(-1);
+      const nextChar = after.charAt(0);
+      const needLead = prevChar && wordRe.test(prevChar) ? ' ' : '';
+      const needTrail = nextChar && wordRe.test(nextChar) ? ' ' : '';
+      out = before + needLead + '**' + inner + '**' + needTrail + after;
+    }
+    if (parts.length % 2 === 0) {
+      out += parts[parts.length - 1];
+    }
+    return out;
+  }
+
   function fixKnownRunOnPhrases(text) {
     const repairs = [
       [/\borderfor\b/gi, 'order for'],
@@ -325,17 +357,10 @@
     // 1. Bullet fix FIRST — split "text* item" onto separate lines.
     text = text.split('\n').map(fixBulletsInLine).join('\n');
 
-    // 2. Bold: trim only the inside edges of each single-line **...** span.
-    text = text.replace(/\*\*([^\n]+?)\*\*/g, (_, inner) => `**${inner.trim()}**`);
-    // Bold opener spacing: word**text** → word **text**
-    text = text.replace(/([A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])(\*\*[^*\n]+?\*\*)/gu, '$1 $2');
-
-    // 3. Bold right-flanking fix: **text:**word → **text:** word
-    //    Closing ** preceded by punctuation and followed by a word char
-    //    fails CommonMark right-flanking rule; insert a space to fix.
-    text = text.replace(/(\*\*[^*\n]+?[:.!?,;)\]])\*\*(?=[^\s*\u0000-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E])/g, '$1** ');
-    // Bold/inline code spacing: **word**text → **word** text
-    text = text.replace(/(\*\*[^*\n]+?\*\*)(?=[A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])/gu, '$1 ');
+    // 2. Bold normalization: pair ** positionally per line, trim inside,
+    //    add spacing outside, drop orphan unpaired **.
+    text = text.split('\n').map(normalizeBoldSpans).join('\n');
+    // Inline code spacing: `code`word → `code` word
     text = text.replace(/(`[^`\n]+`)(?=[A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])/gu, '$1 ');
 
     // 4. Italic: *text * → *text* (space before closing *)
