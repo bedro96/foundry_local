@@ -296,6 +296,26 @@
     return result.join('\n');
   }
 
+  function fixRunOnMeasurements(text) {
+    return text.replace(
+      /\b([A-Za-z]{1,12})(\d+(?:\.\d+)?)(?=\s?(?:°[CF]|°|%|bar\b|psi\b|rpm\b|Hz\b|kg\b|g\b|mm\b|cm\b|km\b|m\b))/g,
+      '$1 $2'
+    );
+  }
+
+  function fixKnownRunOnPhrases(text) {
+    const repairs = [
+      [/\borderfor\b/gi, 'order for'],
+      [/\bthevibration\b/gi, 'the vibration'],
+      [/\bworkorder\b/gi, 'work order'],
+    ];
+
+    for (const [pattern, replacement] of repairs) {
+      text = text.replace(pattern, replacement);
+    }
+    return text;
+  }
+
   // Fix common LLM markdown quirks before parsing.
   function fixLlmMarkdown(text) {
     // 1. Bullet fix FIRST — split "text* item" onto separate lines.
@@ -310,13 +330,20 @@
     //    Closing ** preceded by punctuation and followed by a word char
     //    fails CommonMark right-flanking rule; insert a space to fix.
     text = text.replace(/(\*\*[^*\n]+?[:.!?,;)\]])\*\*(?=[^\s*\u0000-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E])/g, '$1** ');
+    // Bold/inline code spacing: **word**text → **word** text
+    text = text.replace(/(\*\*[^*\n]+?\*\*)(?=[A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])/gu, '$1 ');
+    text = text.replace(/(`[^`\n]+`)(?=[A-Za-z0-9\u00C0-\u024F\u0400-\u04FF\uAC00-\uD7A3])/gu, '$1 ');
 
     // 4. Italic: *text * → *text* (space before closing *)
     text = text.replace(/(?<!\*)\*(?!\*)(.+?)[^\S\n]+\*(?!\*)/g, '*$1*');
     // Italic: * text* → *text* (space after opening *)
     text = text.replace(/(?<!\*)\*[^\S\n]+([^\s*].*?)\*(?!\*)/g, '*$1*');
 
-    // 5. Tab-separated tables → pipe-separated markdown tables.
+    // 5. Fix common LLM run-on tokens that break readability after rendering.
+    text = fixRunOnMeasurements(text);
+    text = fixKnownRunOnPhrases(text);
+
+    // 6. Tab-separated tables → pipe-separated markdown tables.
     text = fixTabTables(text);
 
     return text;
