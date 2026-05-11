@@ -1,6 +1,6 @@
 # 🏭 Smart Factory Agent — Local LLM on Apple Silicon
 
-A terminal-based multi-turn chat client **and** Flask web UI for a **smart factory / shipyard agent** persona, powered by a local LLM running on Apple Silicon via [MLX](https://github.com/apple/mlx).
+A terminal-based multi-turn chat client **and** Flask web UI for a **smart factory agent** persona, powered by a local LLM running on Apple Silicon via [MLX](https://github.com/apple/mlx).
 
 No cloud API keys needed — everything runs locally on your Mac.
 
